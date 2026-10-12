@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Xbox Remote Play - touch gamepad overlay
 // @namespace    https://github.com/juanvelascogm/Misc
-// @version      1.1
+// @version      1.2
 // @description  Portrait layout with a virtual Xbox gamepad under the stream; mixes audio with other apps
 // @author       juanvelascogm
 // @match        https://www.xbox.com/*
@@ -53,6 +53,69 @@
     b.value = down ? 1 : 0;
   };
 
+  // ---- Resilience: iOS kills the stream when the page is backgrounded or the screen locks
+  const streamVideo = () => {
+    const v = document.querySelector('video');
+    return v && v.videoWidth > 0 ? v : null;
+  };
+  let banner = null;
+  const showBanner = (text) => {
+    if (!document.body) return;
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:104px;z-index:2147483647;' +
+        'padding:10px 12px;border-radius:12px;background:#b81f1f;color:#fff;font:600 14px -apple-system,system-ui,sans-serif;display:none';
+      banner.addEventListener('click', () => location.reload());
+      document.body.appendChild(banner);
+    }
+    banner.textContent = text;
+    banner.style.display = text ? 'block' : 'none';
+  };
+  const reloadGuarded = () => {
+    try {
+      const now = Date.now();
+      const t = JSON.parse(sessionStorage.getItem('xrpReloads') || '[]').filter((x) => now - x < 60000);
+      if (t.length >= 3) { showBanner('Stream keeps dropping. Tap here to reload.'); return; }
+      t.push(now);
+      sessionStorage.setItem('xrpReloads', JSON.stringify(t));
+    } catch (_) {}
+    location.reload();
+  };
+  let streamingAtHide = false;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { streamingAtHide = !!streamVideo(); return; }
+    keepAwake();
+    if (!streamingAtHide) return;
+    streamingAtHide = false;
+    // Back in the tab: give the stream a moment, then reload if the picture is frozen or gone.
+    const v0 = streamVideo();
+    const t0 = v0 ? v0.currentTime : 0;
+    setTimeout(() => {
+      const v = streamVideo();
+      if (!v || v.paused || !(v.currentTime > t0 + 0.2)) reloadGuarded();
+    }, 1500);
+  });
+
+  // Keep the screen awake while streaming (auto-lock would cut the stream).
+  let wakeLock = null;
+  async function keepAwake() {
+    try {
+      if (!navigator.wakeLock || wakeLock || document.hidden || !streamVideo()) return;
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (_) { wakeLock = null; }
+  }
+
+  // Watchdog while visible: a frozen picture shows a tap-to-reload banner.
+  let lastT = -1, lastChange = Date.now();
+  setInterval(() => {
+    keepAwake();
+    const v = streamVideo();
+    if (!v || document.hidden) { lastChange = Date.now(); return; }
+    if (v.currentTime !== lastT) { lastT = v.currentTime; lastChange = Date.now(); if (banner) showBanner(''); }
+    else if (Date.now() - lastChange > 8000) showBanner('Stream lost. Tap here to reload.');
+  }, 2000);
+
   // ---- UI
   const css = `
   :root{--xrp-h:calc(100vh - 56.25vw)}
@@ -69,6 +132,8 @@
   .xrp-stick{position:absolute;border-radius:50%;background:#101013;border:.6vw solid #26262b;box-shadow:inset 0 0 3vw #000;transform:translate(-50%,-50%)}
   .xrp-knob{position:absolute;left:50%;top:50%;width:62%;height:62%;margin:-31% 0 0 -31%;border-radius:50%;
     background:radial-gradient(#34343b,#1c1c20);border:.5vw solid #0a0a0c}
+  #xrp-reload{position:fixed;top:calc(env(safe-area-inset-top) + 6px);right:52px;z-index:2147483647;width:40px;height:40px;
+    border-radius:20px;border:0;background:rgba(40,40,46,.8);color:#fff;font-size:20px}
   #xrp-toggle{position:fixed;top:calc(env(safe-area-inset-top) + 6px);right:6px;z-index:2147483647;width:40px;height:40px;
     border-radius:20px;border:0;background:rgba(40,40,46,.8);color:#fff;font-size:20px}
   body.xrp-on video{position:fixed!important;top:0!important;left:0!important;width:100vw!important;
@@ -82,6 +147,10 @@
   const toggle = document.createElement('button');
   toggle.id = 'xrp-toggle';
   toggle.textContent = '\u{1F3AE}';
+  const reloadBtn = document.createElement('button');
+  reloadBtn.id = 'xrp-reload';
+  reloadBtn.textContent = '\u21BB';
+  reloadBtn.addEventListener('click', () => location.reload());
 
   // [label, button index, x vw, y vw (from panel top), w vw, h vw, class] - layout mirrors the native app
   const defs = [
@@ -178,11 +247,11 @@
     document.body.classList.toggle('xrp-on', on);
     if (on) announce();
   };
-  toggle.addEventListener('click', () => setPad(!padVisible));
+  toggle.addEventListener('click', () => { setPad(!padVisible); keepAwake(); });
 
   const mount = () => {
     document.head.appendChild(style);
-    document.body.append(panel, toggle);
+    document.body.append(panel, toggle, reloadBtn);
     // Auto-show the pad once a stream <video> has started.
     let auto = false;
     setInterval(() => {
