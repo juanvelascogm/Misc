@@ -1,8 +1,16 @@
 // ==UserScript==
 // @name         Xbox Remote Play - touch gamepad overlay
+// @namespace    https://github.com/juanvelascogm/Misc
+// @version      1.0
+// @description  Portrait layout with a virtual Xbox gamepad under the stream; mixes audio with other apps
+// @author       juanvelascogm
 // @match        https://www.xbox.com/*/play*
 // @match        https://www.xbox.com/*/remoteplay*
 // @match        https://www.xbox.com/remoteplay*
+// @match        https://xbox.com/*/play*
+// @match        https://xbox.com/*/remoteplay*
+// @match        https://xbox.com/remoteplay*
+// @noframes
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
